@@ -1,6 +1,6 @@
 EXECUTABLE := game
 
-SOURCES := main.cpp Dot.cpp menu.cpp music.cpp
+SOURCES := main.cpp Dot.cpp menu.cpp music.cpp Enemy.cpp
 
 CXXFLAGS := -Wall -Wextra -std=c++11
 

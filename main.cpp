@@ -1,44 +1,28 @@
 #include <SDL2/SDL.h>
 #include <iostream>
+#include <vector> // Для хранения списка врагов
+#include "Dot.h"
+#include "menu.h"
+#include "music.h"
+#include "constants.h"
+#include "Enemy.h" // Подключаем класс Enemy
 
-const int SCREEN_WIDTH = 1280;
-const int SCREEN_HEIGHT = 720;
-const int DOT_SIZE = 20;
+// Прототип функции для проверки столкновений
+bool isColliding(const Dot& dot, const Enemy& enemy);
 
-class Dot {
-public:
-    Dot(int x, int y) : mPosX(x), mPosY(y) {}
-
-    void handleEvent(SDL_Event& e) {
-        if (e.type == SDL_KEYDOWN && e.key.repeat == 0) {
-            switch (e.key.keysym.sym) {
-                case SDLK_w: mPosY -= DOT_SIZE; break;
-                case SDLK_s: mPosY += DOT_SIZE; break;
-                case SDLK_a: mPosX -= DOT_SIZE; break;
-                case SDLK_d: mPosX += DOT_SIZE; break;
-            }
-        }
-
-        // Ограничение движения точки в пределах экрана
-        if (mPosX < 0) mPosX = 0;
-        if (mPosX > SCREEN_WIDTH - DOT_SIZE) mPosX = SCREEN_WIDTH - DOT_SIZE;
-        if (mPosY < 0) mPosY = 0;
-        if (mPosY > SCREEN_HEIGHT - DOT_SIZE) mPosY = SCREEN_HEIGHT - DOT_SIZE;
-    }
-
-    void render(SDL_Renderer* renderer) {
-        SDL_Rect fillRect = { mPosX, mPosY, DOT_SIZE, DOT_SIZE };
-        SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
-        SDL_RenderFillRect(renderer, &fillRect);
-    }
-
-private:
-    int mPosX, mPosY;
-};
-
-int main(int argc, char* args[]) {
-    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+int main(int /*argc*/, char* /*args*/[]) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) { // Инициализируем видео и аудио
         std::cerr << "SDL could not initialize! SDL_Error: " << SDL_GetError() << std::endl;
+        return 1;
+    }
+
+    if (TTF_Init() == -1) { // Инициализация SDL_ttf
+        std::cerr << "SDL_ttf could not initialize! SDL_ttf Error: " << TTF_GetError() << std::endl;
+        return 1;
+    }
+
+    if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0) { // Инициализация SDL_mixer
+        std::cerr << "SDL_mixer could not initialize! SDL_mixer Error: " << Mix_GetError() << std::endl;
         return 1;
     }
 
@@ -59,29 +43,114 @@ int main(int argc, char* args[]) {
 
     bool quit = false;
     SDL_Event e;
-
+    int selectedItem = 0;
+    GameState gameState = MENU;
+    bool keys[4] = {false, false, false, false}; // W, S, A, D
     Dot dot(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+
+    Uint32 lastFrameTime = SDL_GetTicks(); // Время начала первого кадра
+
+    Mix_Music* music = loadMusic("music.mp3");
+    if (music == nullptr) {
+        std::cerr << "Failed to load background music! SDL_mixer Error: " << Mix_GetError() << std::endl;
+    } else {
+        playMusic(music, -1); // -1 означает бесконечное воспроизведение
+    }
+
+    // Создаем список врагов
+    std::vector<Enemy> enemies;
+    enemies.emplace_back(SCREEN_WIDTH / 4, SCREEN_HEIGHT / 4); // Первый враг
+    enemies.emplace_back(3 * SCREEN_WIDTH / 4, 3 * SCREEN_HEIGHT / 4); // Второй враг
 
     while (!quit) {
         while (SDL_PollEvent(&e) != 0) {
             if (e.type == SDL_QUIT) {
                 quit = true;
-            } else {
-                dot.handleEvent(e);
+                gameState = EXIT;
+            }
+            if (gameState == MENU) {
+                handleMenuEvents(e, &selectedItem, &gameState, &quit); // Передаем флаг quit в функцию обработки событий
+            } else if (gameState == PLAYING) {
+                if (e.type == SDL_KEYDOWN && e.key.repeat == 0) {
+                    switch (e.key.keysym.sym) {
+                        case SDLK_w: keys[0] = true; break;
+                        case SDLK_s: keys[1] = true; break;
+                        case SDLK_a: keys[2] = true; break;
+                        case SDLK_d: keys[3] = true; break;
+                    }
+                } else if (e.type == SDL_KEYUP) {
+                    switch (e.key.keysym.sym) {
+                        case SDLK_w: keys[0] = false; break;
+                        case SDLK_s: keys[1] = false; break;
+                        case SDLK_a: keys[2] = false; break;
+                        case SDLK_d: keys[3] = false; break;
+                    }
+                }
             }
         }
 
-        SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF);
-        SDL_RenderClear(renderer);
+        if (gameState == MENU) {
+            renderMenu(renderer, selectedItem);
+        } else if (gameState == PLAYING) {
+            Uint32 currentTime = SDL_GetTicks();
+            Uint32 deltaTime = currentTime - lastFrameTime;
+            lastFrameTime = currentTime;
 
-        dot.render(renderer);
+            // Движение игрока
+            dot.move(keys, deltaTime, SCREEN_WIDTH, SCREEN_HEIGHT);
 
-        SDL_RenderPresent(renderer);
+            // Обновляем позиции всех врагов
+            for (auto& enemy : enemies) {
+                enemy.updatePosition(dot, deltaTime, SCREEN_WIDTH, SCREEN_HEIGHT);
+            }
+
+            // Проверяем столкновения с врагами
+            for (const auto& enemy : enemies) {
+                if (isColliding(dot, enemy)) {
+                    std::cout << "Game Over!" << std::endl;
+                    quit = true;
+                    gameState = EXIT;
+                    break;
+                }
+            }
+
+            // Отрисовка
+            SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF);
+            SDL_RenderClear(renderer);
+
+            dot.render(renderer);
+
+            // Рисуем всех врагов
+            for (const auto& enemy : enemies) {
+                enemy.render(renderer);
+            }
+
+            SDL_RenderPresent(renderer);
+
+            // Ограничиваем количество кадров в секунду до 60 FPS
+            SDL_Delay(16);
+        }
     }
 
+    // Освобождаем ресурсы
+    if (music != nullptr) {
+        Mix_FreeMusic(music);
+        music = nullptr;
+    }
+
+    Mix_CloseAudio();
+    TTF_Quit();
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
 
     return 0;
+}
+
+// Функция для проверки столкновений между игроком и врагом
+bool isColliding(const Dot& dot, const Enemy& enemy) {
+    return (dot.getX() < enemy.getX() + ENEMY_SIZE &&
+            dot.getX() + DOT_SIZE > enemy.getX() &&
+            dot.getY() < enemy.getY() + ENEMY_SIZE &&
+            dot.getY() + DOT_SIZE > enemy.getY());
 }
