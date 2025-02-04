@@ -1,11 +1,13 @@
 #include "Enemy.h"
 #include <cmath>
 
+const int ENEMY_SIZE = 20;
+
 Enemy::Enemy(int x, int y) : mPosX(x), mPosY(y) {}
 
 void Enemy::updatePosition(const Dot& player, Uint32 deltaTime, int screenWidth, int screenHeight) {
-    float playerX = player.mPosX;
-    float playerY = player.mPosY;
+    float playerX = player.getX();
+    float playerY = player.getY();
 
     // Вычисляем направление движения
     float dx = playerX - mPosX;
@@ -13,7 +15,7 @@ void Enemy::updatePosition(const Dot& player, Uint32 deltaTime, int screenWidth,
     float distance = std::sqrt(dx * dx + dy * dy);
 
     if (distance > 0) {
-        float speedFactor = SPEED * (deltaTime / 1000.0f); // Учитываем время между кадрами
+        float speedFactor = (SPEED - 10)* (deltaTime / 1000.0f); // Учитываем время между кадрами
         mPosX += (dx / distance) * speedFactor;
         mPosY += (dy / distance) * speedFactor;
     }
