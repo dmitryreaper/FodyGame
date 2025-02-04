@@ -1,4 +1,5 @@
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_mixer.h>
 #include <iostream>
 #include <vector> // Для хранения списка врагов
 #include "Dot.h"
@@ -7,26 +8,25 @@
 #include "constants.h"
 #include "Enemy.h" // Подключаем класс Enemy
 
-// Прототип функции для проверки столкновений
+// Прототипы функций для проверки столкновений
 bool isColliding(const Dot& dot, const Enemy& enemy);
+bool isCollidingEnemies(const Enemy& enemy1, const Enemy& enemy2);
 
 int main(int /*argc*/, char* /*args*/[]) {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) { // Инициализируем видео и аудио
         std::cerr << "SDL could not initialize! SDL_Error: " << SDL_GetError() << std::endl;
         return 1;
     }
-
     if (TTF_Init() == -1) { // Инициализация SDL_ttf
         std::cerr << "SDL_ttf could not initialize! SDL_ttf Error: " << TTF_GetError() << std::endl;
         return 1;
     }
-
     if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0) { // Инициализация SDL_mixer
         std::cerr << "SDL_mixer could not initialize! SDL_mixer Error: " << Mix_GetError() << std::endl;
         return 1;
     }
 
-    SDL_Window* window = SDL_CreateWindow("Move the Dot", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
+    SDL_Window* window = SDL_CreateWindow("FodyGame", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
     if (!window) {
         std::cerr << "Window could not be created! SDL_Error: " << SDL_GetError() << std::endl;
         SDL_Quit();
@@ -42,19 +42,20 @@ int main(int /*argc*/, char* /*args*/[]) {
     }
 
     bool quit = false;
-    SDL_Event e;
     int selectedItem = 0;
     GameState gameState = MENU;
     bool keys[4] = {false, false, false, false}; // W, S, A, D
     Dot dot(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
-
     Uint32 lastFrameTime = SDL_GetTicks(); // Время начала первого кадра
 
-    Mix_Music* music = loadMusic("music.mp3");
-    if (music == nullptr) {
+    Mix_Music* menumusic = loadMusic("./music/music.mp3");
+    Mix_Music* gameMusic = loadMusic("./music/musicstart.mp3");
+
+    if (menumusic == nullptr || gameMusic == nullptr) {
         std::cerr << "Failed to load background music! SDL_mixer Error: " << Mix_GetError() << std::endl;
     } else {
-        playMusic(music, -1); // -1 означает бесконечное воспроизведение
+        playMusic(menumusic, -1); // -1 означает бесконечное воспроизведение
+        playMusic(gameMusic, -1); // -1 означает бесконечное воспроизведение
     }
 
     // Создаем список врагов
@@ -63,23 +64,24 @@ int main(int /*argc*/, char* /*args*/[]) {
     enemies.emplace_back(3 * SCREEN_WIDTH / 4, 3 * SCREEN_HEIGHT / 4); // Второй враг
 
     while (!quit) {
-        while (SDL_PollEvent(&e) != 0) {
-            if (e.type == SDL_QUIT) {
+        SDL_Event event; // Используем переменную 'event'
+        while (SDL_PollEvent(&event) != 0) {
+            if (event.type == SDL_QUIT) {
                 quit = true;
                 gameState = EXIT;
             }
             if (gameState == MENU) {
-                handleMenuEvents(e, &selectedItem, &gameState, &quit); // Передаем флаг quit в функцию обработки событий
+                handleMenuEvents(event, &selectedItem, &gameState, &quit, menumusic, nullptr); // Используем переменную 'selectedItem'
             } else if (gameState == PLAYING) {
-                if (e.type == SDL_KEYDOWN && e.key.repeat == 0) {
-                    switch (e.key.keysym.sym) {
+                if (event.type == SDL_KEYDOWN && event.key.repeat == 0) {
+                    switch (event.key.keysym.sym) {
                         case SDLK_w: keys[0] = true; break;
                         case SDLK_s: keys[1] = true; break;
                         case SDLK_a: keys[2] = true; break;
                         case SDLK_d: keys[3] = true; break;
                     }
-                } else if (e.type == SDL_KEYUP) {
-                    switch (e.key.keysym.sym) {
+                } else if (event.type == SDL_KEYUP) {
+                    switch (event.key.keysym.sym) {
                         case SDLK_w: keys[0] = false; break;
                         case SDLK_s: keys[1] = false; break;
                         case SDLK_a: keys[2] = false; break;
@@ -102,6 +104,25 @@ int main(int /*argc*/, char* /*args*/[]) {
             // Обновляем позиции всех врагов
             for (auto& enemy : enemies) {
                 enemy.updatePosition(dot, deltaTime, SCREEN_WIDTH, SCREEN_HEIGHT);
+            }
+
+            // Проверяем коллизии между врагами и корректируем их позиции
+            for (size_t i = 0; i < enemies.size(); ++i) {
+                for (size_t j = i + 1; j < enemies.size(); ++j) {
+                    if (isCollidingEnemies(enemies[i], enemies[j])) {
+                        float dx = enemies[j].getX() - enemies[i].getX();
+                        float dy = enemies[j].getY() - enemies[i].getY();
+                        float distance = std::sqrt(dx * dx + dy * dy);
+
+                        if (distance > 0) {
+                            float correctionFactor = (ENEMY_SIZE - distance) / 2.0f;
+                            enemies[i].setX(enemies[i].getX() - (dx / distance) * correctionFactor);
+                            enemies[i].setY(enemies[i].getY() - (dy / distance) * correctionFactor);
+                            enemies[j].setX(enemies[j].getX() + (dx / distance) * correctionFactor);
+                            enemies[j].setY(enemies[j].getY() + (dy / distance) * correctionFactor);
+                        }
+                    }
+                }
             }
 
             // Проверяем столкновения с врагами
@@ -133,9 +154,11 @@ int main(int /*argc*/, char* /*args*/[]) {
     }
 
     // Освобождаем ресурсы
-    if (music != nullptr) {
-        Mix_FreeMusic(music);
-        music = nullptr;
+    if (menumusic != nullptr || gameMusic != nullptr) {
+        Mix_FreeMusic(menumusic);
+        Mix_FreeMusic(gameMusic);
+        menumusic = nullptr;
+        gameMusic = nullptr;
     }
 
     Mix_CloseAudio();
@@ -153,4 +176,12 @@ bool isColliding(const Dot& dot, const Enemy& enemy) {
             dot.getX() + DOT_SIZE > enemy.getX() &&
             dot.getY() < enemy.getY() + ENEMY_SIZE &&
             dot.getY() + DOT_SIZE > enemy.getY());
+}
+
+// Функция для проверки столкновений между врагами
+bool isCollidingEnemies(const Enemy& enemy1, const Enemy& enemy2) {
+    return (enemy1.getX() < enemy2.getX() + ENEMY_SIZE &&
+            enemy1.getX() + ENEMY_SIZE > enemy2.getX() &&
+            enemy1.getY() < enemy2.getY() + ENEMY_SIZE &&
+            enemy1.getY() + ENEMY_SIZE > enemy2.getY());
 }
